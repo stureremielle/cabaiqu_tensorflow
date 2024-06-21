@@ -35,7 +35,7 @@ id camera_container
 id camera_fragment
 id capture_button
 id fragment_container
-id imageView
+id gallery_button
 id inference_time_label
 id inference_time_val
 id max_results_minus

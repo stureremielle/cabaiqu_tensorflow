@@ -31,7 +31,7 @@ public final class FragmentCameraBinding implements ViewBinding {
   public final ImageView captureButton;
 
   @NonNull
-  public final ImageView imageView;
+  public final ImageView galleryButton;
 
   @NonNull
   public final OverlayView overlay;
@@ -41,13 +41,13 @@ public final class FragmentCameraBinding implements ViewBinding {
 
   private FragmentCameraBinding(@NonNull CoordinatorLayout rootView,
       @NonNull InfoBottomSheetBinding bottomSheetLayout, @NonNull CoordinatorLayout cameraContainer,
-      @NonNull ImageView captureButton, @NonNull ImageView imageView, @NonNull OverlayView overlay,
-      @NonNull PreviewView viewFinder) {
+      @NonNull ImageView captureButton, @NonNull ImageView galleryButton,
+      @NonNull OverlayView overlay, @NonNull PreviewView viewFinder) {
     this.rootView = rootView;
     this.bottomSheetLayout = bottomSheetLayout;
     this.cameraContainer = cameraContainer;
     this.captureButton = captureButton;
-    this.imageView = imageView;
+    this.galleryButton = galleryButton;
     this.overlay = overlay;
     this.viewFinder = viewFinder;
   }
@@ -94,9 +94,9 @@ public final class FragmentCameraBinding implements ViewBinding {
         break missingId;
       }
 
-      id = R.id.imageView;
-      ImageView imageView = ViewBindings.findChildViewById(rootView, id);
-      if (imageView == null) {
+      id = R.id.gallery_button;
+      ImageView galleryButton = ViewBindings.findChildViewById(rootView, id);
+      if (galleryButton == null) {
         break missingId;
       }
 
@@ -113,7 +113,7 @@ public final class FragmentCameraBinding implements ViewBinding {
       }
 
       return new FragmentCameraBinding((CoordinatorLayout) rootView, binding_bottomSheetLayout,
-          cameraContainer, captureButton, imageView, overlay, viewFinder);
+          cameraContainer, captureButton, galleryButton, overlay, viewFinder);
     }
     String missingId = rootView.getResources().getResourceName(id);
     throw new NullPointerException("Missing required view with ID: ".concat(missingId));

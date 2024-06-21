@@ -1,18 +1,3 @@
-/*
- * Copyright 2022 The TensorFlow Authors. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *             http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package org.tensorflow.lite.examples.objectdetection.fragments
 
 import android.annotation.SuppressLint
@@ -36,6 +21,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.navigation.Navigation
+import com.google.android.material.bottomsheet.BottomSheetBehavior
 import java.util.LinkedList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -63,13 +49,18 @@ class CameraFragment : Fragment(), ObjectDetectorHelper.DetectorListener {
     /** Blocking camera operations are performed using this executor */
     private lateinit var cameraExecutor: ExecutorService
 
+    private var bottomSheetBehavior: BottomSheetBehavior<View>? = null
+
     override fun onResume() {
         super.onResume()
-        // Make sure that all permissions are still present, since the
-        // user could have removed them while the app was in paused state.
+        Log.d(TAG, "onResume called")
         if (!PermissionsFragment.hasPermissions(requireContext())) {
+            Log.d(TAG, "Permissions not granted, navigating to permissions fragment")
             Navigation.findNavController(requireActivity(), R.id.fragment_container)
                 .navigate(CameraFragmentDirections.actionCameraToPermissions())
+        } else {
+            Log.d(TAG, "Permissions already granted")
+            setUpCamera()
         }
     }
 
@@ -88,6 +79,13 @@ class CameraFragment : Fragment(), ObjectDetectorHelper.DetectorListener {
     ): View {
         _fragmentCameraBinding = FragmentCameraBinding.inflate(inflater, container, false)
 
+        // Initialize objectDetectorHelper
+        objectDetectorHelper = ObjectDetectorHelper(context = requireContext(), objectDetectorListener = this)
+
+        // Initialize camera executor
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        Log.d(TAG, "Camera executor initialized")
+
         return fragmentCameraBinding.root
     }
 
@@ -95,21 +93,38 @@ class CameraFragment : Fragment(), ObjectDetectorHelper.DetectorListener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        objectDetectorHelper = ObjectDetectorHelper(
-            context = requireContext(),
-            objectDetectorListener = this)
+        // Initialize BottomSheetBehavior
+        bottomSheetBehavior = BottomSheetBehavior.from(fragmentCameraBinding.bottomSheetLayout.root)
+        bottomSheetBehavior?.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+            override fun onStateChanged(bottomSheet: View, newState: Int) {
+                when (newState) {
+                    BottomSheetBehavior.STATE_EXPANDED -> {
+                        fragmentCameraBinding.captureButton.visibility = View.GONE
+                        fragmentCameraBinding.galleryButton.visibility = View.GONE
+                    }
+                    BottomSheetBehavior.STATE_COLLAPSED -> {
+                        fragmentCameraBinding.captureButton.visibility = View.VISIBLE
+                        fragmentCameraBinding.galleryButton.visibility = View.VISIBLE
+                    }
+                }
+            }
 
-        // Initialize our background executor
-        cameraExecutor = Executors.newSingleThreadExecutor()
-
-        // Wait for the views to be properly laid out
-        fragmentCameraBinding.viewFinder.post {
-            // Set up the camera and its use cases
-            setUpCamera()
-        }
+            override fun onSlide(bottomSheet: View, slideOffset: Float) {
+                if (slideOffset > 0) {
+                    fragmentCameraBinding.captureButton.visibility = View.GONE
+                    fragmentCameraBinding.galleryButton.visibility = View.GONE
+                } else {
+                    fragmentCameraBinding.captureButton.visibility = View.VISIBLE
+                    fragmentCameraBinding.galleryButton.visibility = View.VISIBLE
+                }
+            }
+        })
 
         // Attach listeners to UI control widgets
         initBottomSheetControls()
+
+        // Set up the camera
+        setUpCamera()
     }
 
     private fun initBottomSheetControls() {
@@ -224,57 +239,40 @@ class CameraFragment : Fragment(), ObjectDetectorHelper.DetectorListener {
     // Declare and bind preview, capture and analysis use cases
     @SuppressLint("UnsafeOptInUsageError")
     private fun bindCameraUseCases() {
+        Log.d(TAG, "Binding camera use cases")
+        val cameraProvider = cameraProvider ?: throw IllegalStateException("Camera initialization failed.")
+        val cameraSelector = CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
 
-        // CameraProvider
-        val cameraProvider =
-            cameraProvider ?: throw IllegalStateException("Camera initialization failed.")
+        preview = Preview.Builder()
+            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .setTargetRotation(fragmentCameraBinding.viewFinder.display.rotation)
+            .build()
 
-        // CameraSelector - makes assumption that we're only using the back camera
-        val cameraSelector =
-            CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
-
-        // Preview. Only using the 4:3 ratio because this is the closest to our models
-        preview =
-            Preview.Builder()
-                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                .setTargetRotation(fragmentCameraBinding.viewFinder.display.rotation)
-                .build()
-
-        // ImageAnalysis. Using RGBA 8888 to match how our models work
-        imageAnalyzer =
-            ImageAnalysis.Builder()
-                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
-                .setTargetRotation(fragmentCameraBinding.viewFinder.display.rotation)
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                .build()
-                // The analyzer can then be assigned to the instance
-                .also {
-                    it.setAnalyzer(cameraExecutor) { image ->
-                        if (!::bitmapBuffer.isInitialized) {
-                            // The image rotation and RGB image buffer are initialized only once
-                            // the analyzer has started running
-                            bitmapBuffer = Bitmap.createBitmap(
-                                image.width,
-                                image.height,
-                                Bitmap.Config.ARGB_8888
-                            )
-                        }
-
-                        detectObjects(image)
+        imageAnalyzer = ImageAnalysis.Builder()
+            .setTargetAspectRatio(AspectRatio.RATIO_4_3)
+            .setTargetRotation(fragmentCameraBinding.viewFinder.display.rotation)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .build()
+            .also {
+                it.setAnalyzer(cameraExecutor) { image ->
+                    if (!::bitmapBuffer.isInitialized) {
+                        bitmapBuffer = Bitmap.createBitmap(
+                            image.width,
+                            image.height,
+                            Bitmap.Config.ARGB_8888
+                        )
                     }
+                    detectObjects(image)
                 }
+            }
 
-        // Must unbind the use-cases before rebinding them
         cameraProvider.unbindAll()
 
         try {
-            // A variable number of use-cases can be passed here -
-            // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageAnalyzer)
-
-            // Attach the viewfinder's surface provider to preview use case
             preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
+            Log.d(TAG, "Camera use cases bound")
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
         }
